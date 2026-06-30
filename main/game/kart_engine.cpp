@@ -1,3 +1,19 @@
+/*
+===============================================================================
+  kart_engine.cpp — Moteur de physique et de contrôle des karts (AKArt)
+-------------------------------------------------------------------------------
+  Rôle :
+    - Gérer la vitesse, l’accélération, le freinage et la friction.
+    - Gérer le drift, les boosts, les sauts et la gravité.
+    - Gérer les collisions (bord de piste, décor, autres karts).
+    - Fournir un angle de vue (k.angle) qui sert à la caméra :
+        * la courbure de la piste (s.curve)
+        * + le steering du joueur (gauche/droite)
+      → la vue tourne quand le joueur tourne, au lieu de simplement glisser
+        le kart à gauche/droite.
+===============================================================================
+*/
+
 #include "kart_engine.h"
 #include "../core/input.h"
 #include "../core/audio.h"
@@ -6,18 +22,36 @@
 
 namespace kart {
 
-static const float MAX_SPEED       = 1.25f;
-static const float ACCEL           = 0.025f;
-static const float BRAKE           = 0.05f;
-static const float FRICTION        = 0.015f;
-static const float TURN            = 0.035f;
-static const float DRIFT_TURN      = 0.07f;
-static const float DRIFT_BUILD     = 0.025f;
-static const float DRIFT_DECAY     = 0.04f;
-static const float BOOST_SPEED     = 1.6f;
+static const float MAX_SPEED       = 2.0f;   // plus rapide (était 1.25)
+static const float ACCEL           = 0.04f;   // accélération plus franche (était 0.025)
+static const float BRAKE           = 0.08f;   // freinage légèrement plus fort
+static const float FRICTION        = 0.02f;   // décélération passive (était 0.015)
+static const float BOOST_SPEED     = 2.6f;
 static const float BOOST_TIME      = 0.8f;
 static const float OFFROAD_PENALTY = 0.45f;
 static const float GRAVITY         = 0.03f;
+
+// -----------------------------------------------------------------------------
+// Direction : fidèle au moteur de référence (cf. javascript-racer de Jake
+// Gordon). Le déplacement latéral lié au volant est PROPORTIONNEL à la
+// vitesse courante (speedPercent = speed/MAX_SPEED) : à l'arrêt, tourner le
+// volant ne déplace pas le kart d'un pixel — exactement comme dans une
+// vraie voiture. À cela s'ajoute une force centrifuge AUTOMATIQUE (sans
+// appui d'aucune touche) qui pousse vers l'extérieur du virage, elle aussi
+// proportionnelle à la vitesse : c'est un effet voulu (pas un bug) qui
+// donne l'impression de devoir "tenir" le virage en contre-braquant.
+// -----------------------------------------------------------------------------
+static const float STEER_RATE   = 3.2f;  // sensibilité du volant
+static const float CENTRIFUGAL  = 0.3f;  // force qui pousse vers l'extérieur du virage
+static const float DRIFT_BOOST_TURN = 1.6f; // multiplicateur de braquage en drift
+
+// Hors-piste prolongé : au-delà de ce délai, le kart est replacé sur la
+// piste (au centre de la voie) avec une forte perte de vitesse, plutôt que
+// de laisser le joueur s'éloigner indéfiniment (ce qui finissait par ne
+// plus rien afficher d'utile à l'écran, la caméra étant alors centrée sur
+// une zone hors de la route).
+static const float OFFTRACK_RESET_DELAY = 1.5f;  // secondes
+static const float OFFTRACK_RESET_SPEED_MULT = 0.25f;
 
 // ---------------------------------------------------------
 // Trouve le segment courant
@@ -48,6 +82,29 @@ static void handle_decor_collision(KartState& k, const Segment& s) {
     if (hit_left || hit_right) {
         k.speed *= DECOR_HIT_SPEED_MULT;
         k.x = hit_left ? -DECOR_EDGE_THRESHOLD : DECOR_EDGE_THRESHOLD;
+        core::sfx_bump();
+    }
+}
+
+// ---------------------------------------------------------
+// Pénalité hors-piste : ralentissement immédiat, puis replacement forcé
+// sur la piste si on y reste trop longtemps.
+// ---------------------------------------------------------
+static void handle_offtrack(KartState& k, float dt) {
+    bool offtrack = std::abs(k.x) > 1.0f;
+
+    if (!offtrack) {
+        k.off_track_timer = 0.0f;
+        return;
+    }
+
+    k.speed *= OFFROAD_PENALTY;
+    k.off_track_timer += dt;
+
+    if (k.off_track_timer >= OFFTRACK_RESET_DELAY) {
+        k.x = 0.0f; // replacé au centre de la piste
+        k.speed *= OFFTRACK_RESET_SPEED_MULT;
+        k.off_track_timer = 0.0f;
         core::sfx_bump();
     }
 }
@@ -88,6 +145,11 @@ static void handle_kart_collisions(std::vector<KartState>& karts) {
 
 // ---------------------------------------------------------
 // update_player()
+//  - Lit les inputs.
+//  - Met à jour vitesse / drift / bonus / saut.
+//  - Met à jour la position longitudinale (z).
+//  - Met à jour la position latérale (x) pour les collisions / hors-piste.
+//  - Met à jour l’angle de vue (k.angle) : courbe de piste + steering joueur.
 // ---------------------------------------------------------
 void update_player(KartState& k, const Track& t, float dt) {
     using namespace core;
@@ -110,24 +172,36 @@ void update_player(KartState& k, const Track& t, float dt) {
     }
 
     k.speed = std::clamp(k.speed, 0.0f, MAX_SPEED);
+    float speed_percent = k.speed / MAX_SPEED;
 
-    // Drift
+    // Drift (l'intensité 0..1 sert seulement à l'inclinaison visuelle du
+    // sprite ; la vitesse de "build/decay" est volontairement indépendante
+    // de la vitesse du kart — c'est un ressenti purement visuel)
     if (driftB && (left || right) && k.speed > 0.3f) {
         k.drifting = true;
-        k.drift = std::min(1.0f, k.drift + DRIFT_BUILD);
+        k.drift = std::min(1.0f, k.drift + dt * 4.0f);
     } else {
         k.drifting = false;
-        k.drift = std::max(0.0f, k.drift - DRIFT_DECAY);
+        k.drift = std::max(0.0f, k.drift - dt * 6.0f);
     }
 
+    // Steering brut (input gauche/droite)
     float turn = 0.0f;
     if (left)  turn -= 1.0f;
     if (right) turn += 1.0f;
 
-    if (k.drifting)
-        k.x += turn * DRIFT_TURN * (0.5f + k.speed);
-    else
-        k.x += turn * TURN * (0.5f + k.speed);
+    const Segment& cur_seg = t.segs[k.seg_index];
+
+    // Déplacement latéral PROPORTIONNEL à la vitesse (référence OutRun) :
+    // à l'arrêt, speed_percent=0, donc tourner le volant ne déplace rien.
+    float dx = dt * STEER_RATE * speed_percent;
+    if (k.drifting) dx *= DRIFT_BOOST_TURN;
+    k.x += turn * dx;
+
+    // Force centrifuge automatique (sans appui d'aucune touche), elle aussi
+    // proportionnelle à la vitesse : pousse vers l'extérieur du virage.
+    // C'est un effet voulu (cf. javascript-racer de référence), pas un bug.
+    k.x -= dx * speed_percent * cur_seg.curve * CENTRIFUGAL;
 
     k.x = std::clamp(k.x, -1.2f, 1.2f);
 
@@ -149,12 +223,23 @@ void update_player(KartState& k, const Track& t, float dt) {
         }
     }
 
-    // Avance
-    k.z += k.speed * dt * 60.0f;
-    if (k.z >= t.total_length) {
-        k.z -= t.total_length;
-        k.lap++;
-        core::sfx_lap();
+    // Avance longitudinale
+    if (!k.finished) {
+        k.z += k.speed * dt * 60.0f;
+        if (k.z >= t.total_length) {
+            k.z -= t.total_length;
+            k.lap++;
+            core::sfx_lap();
+            if (k.lap >= t.laps) {
+                k.finished = true;
+                k.speed = 0.0f;
+                // Points selon la place finale (rank commence à 1)
+                int rank_idx = k.rank - 1;
+                if (rank_idx < 0) rank_idx = 0;
+                if (rank_idx > 3) rank_idx = 3;
+                k.score += t.points_by_rank[rank_idx];
+            }
+        }
     }
 
     k.seg_index = find_segment(t, k.z);
@@ -187,13 +272,17 @@ void update_player(KartState& k, const Track& t, float dt) {
         }
     }
 
-    // Offroad
-    if (std::abs(k.x) > 1.0f)
-        k.speed *= OFFROAD_PENALTY;
+    // Hors-piste : pénalité + replacement forcé après un délai
+    handle_offtrack(k, dt);
 
     handle_decor_collision(k, s);
 
-    k.angle = s.curve * 0.5f;
+    // -----------------------------------------------------
+    // Angle cosmétique (k.angle) — utilisé pour le volant/HUD uniquement,
+    // pas pour la route (cf. kart_render.cpp : c'est la route qui se
+    // décale, jamais une vraie rotation de caméra).
+    // -----------------------------------------------------
+    k.angle = s.curve * 0.5f + turn * dx * 4.0f;
 }
 
 // ---------------------------------------------------------
@@ -210,20 +299,30 @@ void update_ai(KartState& k, const Track& t, float dt) {
         k.speed += ACCEL * 0.8f;
 
     // Avance
-    k.z += k.speed * dt * 60.0f;
-    if (k.z >= t.total_length) {
-        k.z -= t.total_length;
-        k.lap++;
+    if (!k.finished) {
+        k.z += k.speed * dt * 60.0f;
+        if (k.z >= t.total_length) {
+            k.z -= t.total_length;
+            k.lap++;
+            if (k.lap >= t.laps) {
+                k.finished = true;
+                k.speed = 0.0f;
+                int rank_idx = k.rank - 1;
+                if (rank_idx < 0) rank_idx = 0;
+                if (rank_idx > 3) rank_idx = 3;
+                k.score += t.points_by_rank[rank_idx];
+            }
+        }
     }
 
     k.seg_index = find_segment(t, k.z);
 
-    // Offroad
-    if (std::abs(k.x) > 1.0f)
-        k.speed *= OFFROAD_PENALTY;
+    // Hors-piste : pénalité + replacement forcé après un délai
+    handle_offtrack(k, dt);
 
     handle_decor_collision(k, s);
 
+    // Pour l’IA, on garde un angle basé uniquement sur la courbure de la piste.
     k.angle = s.curve * 0.5f;
 }
 

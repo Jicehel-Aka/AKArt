@@ -4,6 +4,7 @@
 ===============================================================================
 */
 #pragma once
+#include <cstdint>
 #include "sprites.h"
 
 namespace core {
@@ -52,6 +53,13 @@ void graphics_pop();
 // Sprites (cf. core/sprites.h)
 void graphics_draw_sprite(SpriteId id, int x, int y);
 void graphics_draw_sprite_rotated(SpriteId id, int x, int y, float angle_deg);
+
+// Bitmap RGB565 brut (sprites importés, cf. core/kart_loader.h). Le pixel de
+// valeur transparent_key (magenta 0xF81F par défaut) n'est pas dessiné.
+constexpr uint16_t TRANSPARENT_KEY = 0xF81F;
+void graphics_draw_bitmap565(int x, int y, int w, int h, const uint16_t* data,
+                              bool use_transparency = true,
+                              uint16_t transparent_key = TRANSPARENT_KEY);
 
 int graphics_width();
 int graphics_height();

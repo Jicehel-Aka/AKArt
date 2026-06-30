@@ -3,6 +3,19 @@
 
 namespace kart {
 
+// Precalcule UNE SEULE FOIS Segment::start_z (position cumulee le long de
+// la piste). C'est juste un utilitaire de distance, sans rapport avec le
+// rendu du virage : la courbure, elle, est accumulee a chaque frame dans
+// kart_render.cpp (cf. son en-tete), fidelement a l'algorithme de
+// reference - ne pas reintroduire de precalcul de "world_x" ici.
+inline void compute_track_geometry(Track& t) {
+    float z = 0.0f;
+    for (auto& s : t.segs) {
+        s.start_z = z;
+        z += s.length;
+    }
+}
+
 inline Track make_test_track() {
     Track t;
     t.laps = 3;
@@ -29,6 +42,8 @@ inline Track make_test_track() {
 
     t.total_length = 0.0f;
     for (auto& s : t.segs) t.total_length += s.length;
+
+    compute_track_geometry(t);
 
     return t;
 }
