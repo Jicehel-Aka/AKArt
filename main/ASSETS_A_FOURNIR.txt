@@ -1,0 +1,96 @@
+===============================================================================
+AKArt — Assets à fournir : liste, usage, emplacement
+===============================================================================
+Ce fichier récapitule tout ce que tu as encore à fournir (musiques), plus un
+inventaire de référence de ce qui est déjà en place (sprites), pour savoir
+où/comment ajouter du contenu plus tard sans avoir à redemander.
+
+
+-------------------------------------------------------------------------------
+1) MUSIQUES (.pmf) — À FOURNIR
+-------------------------------------------------------------------------------
+Format attendu : fichier .pmf (format tracker de la lib Gamebuino-AKA,
+gb_audio_track_pmf / pmf_player). Pas de .mp3/.wav/.ogg — il faut composer ou
+convertir vers ce format spécifique.
+
+Marche à suivre pour CHAQUE fichier :
+  1. Dépose ton .pmf où tu veux (racine du repo par exemple).
+  2. Lance :
+       python3 tools/pmf_to_c.py music_hills.pmf assets/music/music_hills.cpp
+  3. C'est tout — le .cpp régénéré remplace le stub silencieux déjà en place,
+     rien d'autre à toucher (les points d'appel dans le code sont déjà
+     branchés via game/music_registry.h).
+
+Tant qu'un fichier n'est pas fourni, le stub silencieux reste en place :
+le jeu compile et tourne normalement, juste sans musique à cet endroit.
+
+  Nom du fichier .pmf      | Usage                          | Emplacement du .cpp généré
+  -------------------------|---------------------------------|----------------------------------
+  music_title.pmf          | Écran titre                    | assets/music/music_title.cpp
+  music_hills.pmf          | Course, thème Collines          | assets/music/music_hills.cpp
+  music_city.pmf           | Course, thème Ville             | assets/music/music_city.cpp
+  music_desert.pmf         | Course, thème Désert            | assets/music/music_desert.cpp
+  music_results.pmf        | Écran de résultats              | assets/music/music_results.cpp
+  jingle_lastlap.pmf       | (optionnel, pas encore branché) | assets/music/jingle_lastlap.cpp
+  jingle_finish.pmf        | (optionnel, pas encore branché) | assets/music/jingle_finish.cpp
+
+Note : jingle_lastlap et jingle_finish ont déjà leur stub + leur entrée dans
+music_registry.h (music_registry.h::jingle_lastlap_ref() / jingle_finish_ref())
+mais je ne les ai pas encore branchés à un événement précis (dernier tour /
+ligne d'arrivée) — dis-moi quand tu veux que je le fasse.
+
+Si tu veux ajouter une NOUVELLE piste musicale plus tard (un jingle de victoire
+par ex.) : crée son .h sur le modèle de assets/music/music_title.h, ajoute son
+#include dans game/music_registry.h, une fonction "xxx_ref()", et branche
+l'appel audio_play_music(...) où tu veux dans game/kart_game.cpp.
+
+
+-------------------------------------------------------------------------------
+2) IMAGES / SPRITES — déjà fournis, pour référence
+-------------------------------------------------------------------------------
+Tout est déjà converti et en place dans assets/gfx/. Tu n'as rien à refaire ici
+sauf si tu veux REMPLACER un visuel existant ou en ajouter un nouveau.
+
+Si tu m'envoies une nouvelle image à convertir, le format le plus simple pour
+moi est : fond MAGENTA uni (255,0,255) autour du sujet, à n'importe quelle
+résolution (je redimensionne). Je m'occupe de la conversion en tableau
+BGR565 + clé de transparence.
+
+  Fichier (assets/gfx/)         | Contenu                                  | Taille (px)
+  -------------------------------|-------------------------------------------|------------
+  decor_tree1.cpp / .2 / .3 / .4 | Arbres (thème Collines/Ville)             | 48×96
+  decor_palm.cpp                 | Palmier                                  | 64×96
+  decor_cactus1/2/3.cpp          | Cactus (remplacent tree1-3 en désert)     | 48×96
+  decor_tire.cpp                 | Pneu (bord de piste)                     | 48×48
+  decor_flag.cpp                 | Drapeau                                  | 64×64
+  decor_rock.cpp                 | Rocher                                   | 64×64
+  decor_house.cpp                | Maison (thème Ville)                     | 64×80
+  decor_start_gate.cpp           | Portique départ                          | 128×80
+  decor_finish_gate.cpp          | Portique arrivée                         | 128×80
+  decor_sign_left.cpp / _right   | Panneaux virage gauche/droite             | 16×32
+  decor_oil_slick.cpp            | Flaque d'huile (décalque au sol)          | 48×24
+  decor_bonus_boost.cpp          | Icône bonus Boost (éclair jaune)          | 32×32
+  decor_bonus_shield.cpp         | Icône bonus Bouclier (cyan)               | 32×32
+  decor_bonus_shock.cpp          | Icône bonus Choc (étoile rouge)           | 32×32
+  decor_sky_bg.cpp               | Fond ciel/horizon, thème Collines         | 640×120
+  decor_sky_bg_city.cpp          | Fond ciel/horizon, thème Ville            | 640×120
+  decor_sky_bg_desert.cpp        | Fond ciel/horizon, thème Désert           | 640×120
+  kart_rouge/bleu/jaune/vert_data.cpp | Sprites des 4 karts (4 poses chacun) | 32×32 par pose
+  title_screen_data.cpp          | Image de fond de l'écran titre            | 320×240
+
+Emplacements encore un peu approximatifs / à améliorer si tu veux repasser
+dessus un jour : le rendu de l'huile et des bonus est simple (pas d'animation,
+pas d'ombre portée) — dis-moi si tu veux des versions plus travaillées.
+
+
+-------------------------------------------------------------------------------
+3) OUTILS DE CONVERSION DISPONIBLES
+-------------------------------------------------------------------------------
+  tools/pmf_to_c.py         → convertit un .pmf en .cpp (musiques, cf. §1)
+  track_editor.html         → dessine un circuit, exporte un .h de piste
+                              (voir game/tracks/ + game/track_registry.h pour
+                              savoir où déposer le résultat)
+
+Je n'ai pas laissé de script de conversion pour les IMAGES (arbres, décor...)
+car je fais cette conversion moi-même à chaque fois que tu m'envoies un
+fichier — pas besoin d'outil de ton côté pour ça, il suffit de me l'envoyer.

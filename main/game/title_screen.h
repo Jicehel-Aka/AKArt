@@ -21,8 +21,11 @@ namespace kart {
 
 // -----------------------------------------------------------------------------
 // Dessine l'écran de titre.
-// blink_time : temps écoulé depuis l’entrée dans l’écran titre (en secondes).
+// blink_time  : temps écoulé depuis l'entrée dans l'écran titre (en secondes).
+// track_name  : nom de la piste actuellement sélectionnée (Joystick G/D pour
+//               changer, cf. track_registry.h / kart_game.cpp) — affiché en
+//               bas de l'écran.
 // -----------------------------------------------------------------------------
-void title_screen_draw(float blink_time);
+void title_screen_draw(float blink_time, const char* track_name);
 
 } // namespace kart

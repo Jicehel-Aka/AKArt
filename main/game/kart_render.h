@@ -45,6 +45,7 @@ void camera_setup(Camera& cam);
 //   - Utilise karts[0] comme joueur (caméra centrée sur lui).
 void draw_race(const Track& t,
                const std::vector<KartState>& karts,
-               const Camera& cam);
+               const Camera& cam,
+               const std::vector<float>& item_box_cooldowns);
 
 } // namespace kart

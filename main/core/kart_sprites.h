@@ -19,8 +19,8 @@
 
 namespace core {
 
-constexpr int KART_SPRITE_W = 32;
-constexpr int KART_SPRITE_H = 32;
+constexpr int KART_SPRITE_W = 64;
+constexpr int KART_SPRITE_H = 64;
 constexpr int KART_SPRITE_PIXELS = KART_SPRITE_W * KART_SPRITE_H;
 
 enum class KartSpriteId {
@@ -35,7 +35,12 @@ enum class KartColor {
     Blue,
     Yellow,
     Green,
+    Pink,
+    Gray,
+    DarkGray,
+    Purple,
 };
+constexpr int kKartColorCount = 8;
 
 // Pointeurs vers les 4 frames d'une couleur de kart (données en flash,
 // aucune copie : cf. kart_loader.cpp).

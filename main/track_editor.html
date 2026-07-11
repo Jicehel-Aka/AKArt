@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>AKArt — Éditeur de circuit</title>
+<style>
+  :root {
+    --bg: #14181f;
+    --panel: #1c222c;
+    --border: #2c3444;
+    --accent: #4fd1c5;
+    --accent2: #f6ad55;
+    --text: #e6e9ef;
+    --muted: #8b96a8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+  }
+  #sidebar {
+    width: 340px;
+    flex-shrink: 0;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    padding: 16px;
+    overflow-y: auto;
+  }
+  #main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  #toolbar {
+    display: flex;
+    gap: 8px;
+    padding: 10px 14px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  #canvasWrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    background:
+      linear-gradient(var(--border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 40px 40px;
+    background-color: #0e1116;
+  }
+  canvas { display: block; cursor: crosshair; }
+  h1 { font-size: 15px; margin: 0 0 4px; color: var(--accent); }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 18px 0 8px; }
+  p.hint { font-size: 12px; color: var(--muted); line-height: 1.5; margin: 4px 0 0; }
+  button {
+    background: #263043;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 12px;
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+  button:hover { background: #303c54; }
+  button.primary { background: var(--accent); color: #08201d; border-color: var(--accent); font-weight: 600; }
+  button.primary:hover { background: #63e0d4; }
+  button.danger { background: #4a2530; border-color: #6b3444; }
+  button.danger:hover { background: #5c2e3c; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  select, input[type=number] {
+    background: #10151c;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 12.5px;
+    width: 100%;
+  }
+  label.field { display: block; font-size: 11.5px; color: var(--muted); margin: 10px 0 4px; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  .stat { display: flex; justify-content: space-between; font-size: 12.5px; padding: 3px 0; border-bottom: 1px dashed var(--border); }
+  .stat b { color: var(--accent); font-weight: 600; }
+  #decorPalette { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  #decorPalette button { text-align: left; font-size: 11.5px; padding: 6px 8px; }
+  #decorPalette button.active { outline: 2px solid var(--accent); }
+  #exportBox {
+    width: 100%;
+    height: 220px;
+    background: #0a0d12;
+    color: #9be79b;
+    font-family: "SF Mono", Consolas, monospace;
+    font-size: 10.5px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px;
+    resize: vertical;
+    white-space: pre;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 10.5px;
+    padding: 1px 7px;
+    border-radius: 10px;
+    background: #263043;
+    color: var(--muted);
+    margin-left: 6px;
+  }
+  .modeBtn.active { background: var(--accent); color: #08201d; border-color: var(--accent); font-weight: 600; }
+  #segInfo { font-size: 12px; color: var(--muted); padding: 8px 14px; background: var(--panel); border-top: 1px solid var(--border); }
+  #segInfo b { color: var(--text); }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h1>AKArt — Éditeur de circuit</h1>
+  <p class="hint">
+    Place des points pour dessiner le tracé vu du dessus (comme sur la minimap).
+    Le circuit se referme automatiquement du dernier point au premier.
+  </p>
+
+  <h2>Outils</h2>
+  <div class="row">
+    <button id="modeAdd" class="modeBtn active">➕ Ajouter</button>
+    <button id="modeMove" class="modeBtn">✋ Déplacer</button>
+  </div>
+  <div class="row" style="margin-top:6px">
+    <button id="modeDecor" class="modeBtn">🌳 Décor</button>
+    <button id="modeDelete" class="modeBtn">🗑 Supprimer pt.</button>
+  </div>
+
+  <h2>Décor à poser (mode 🌳)</h2>
+  <p class="hint">Clique un point du tracé, puis choisis le décor du côté gauche/droite de la route à cet endroit.</p>
+  <label class="field">Côté à peindre</label>
+  <div class="row">
+    <button id="sideLeft" class="modeBtn active">◀ Gauche</button>
+    <button id="sideRight" class="modeBtn">Droite ▶</button>
+  </div>
+  <div id="decorPalette" style="margin-top:8px"></div>
+
+  <h2>Réglages</h2>
+  <label class="field">Longueur de segment (unités moteur)</label>
+  <input type="number" id="segLen" value="80" min="20" max="200" step="10">
+
+  <label class="field">Intensité des virages (K) <span class="badge">calibre "curve"</span></label>
+  <input type="number" id="curveK" value="0.045" step="0.005">
+  <p class="hint">Doit correspondre à <code>CURVE_RENDER_SCALE</code> côté moteur (actuellement 18) — plus K est petit, plus les virages générés sont serrés dans le fichier exporté. Ajuste et réexporte si les virages en jeu semblent trop mous ou trop violents.</p>
+
+  <label class="field">Thème par défaut</label>
+  <select id="themeSelect">
+    <option value="Hills">Collines</option>
+    <option value="City">Ville</option>
+    <option value="Desert">Désert</option>
+  </select>
+
+  <h2>Statistiques</h2>
+  <div class="stat"><span>Points posés</span><b id="statPoints">0</b></div>
+  <div class="stat"><span>Segments (après échantillonnage)</span><b id="statSegs">0</b></div>
+  <div class="stat"><span>Longueur totale</span><b id="statLen">0</b></div>
+  <div class="stat"><span>Boucle fermée ?</span><b id="statClosed">non</b></div>
+
+  <h2>Fichier</h2>
+  <div class="row">
+    <button id="btnClear" class="danger">Tout effacer</button>
+    <button id="btnUndo">↩ Annuler pt.</button>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <button id="btnExport" class="primary" style="flex:1">Générer le code C++ ⤵</button>
+  </div>
+</div>
+
+<div id="main">
+  <div id="toolbar">
+    <span style="font-size:12px;color:var(--muted)">Molette = zoom · glisser le fond = déplacer la vue</span>
+  </div>
+  <div id="canvasWrap">
+    <canvas id="cv"></canvas>
+  </div>
+  <div id="segInfo">Survole un point du tracé échantillonné pour voir ses infos (longueur / courbure / décor).</div>
+</div>
+
+<textarea id="exportBox" style="display:none"></textarea>
+
+<script>
+// =====================================================================
+// AKArt Track Editor — dessin d'un tracé 2D réel, échantillonnage en
+// segments de longueur fixe, export C++ compatible avec le moteur
+// (shape_dx/shape_dy exacts pour la minimap + curve/length pour le rendu
+// pseudo-3D).
+// =====================================================================
+
+const DECOR_NAMES = {
+  0: "— (rien)",
+  1: "Arbre 1", 2: "Arbre 2", 3: "Arbre 3", 4: "Arbre 4",
+  5: "Palmier", 6: "Pneu", 7: "Drapeau", 8: "Rocher", 9: "Maison",
+  12: "Panneau virage G", 13: "Panneau virage D"
+};
+
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const wrap = document.getElementById('canvasWrap');
+
+function resizeCanvas() {
+  cv.width = wrap.clientWidth;
+  cv.height = wrap.clientHeight;
+  draw();
+}
+window.addEventListener('resize', resizeCanvas);
+
+// --- État ---
+let points = [];          // waypoints bruts {x,y} en unités monde
+let closed = false;
+let mode = 'add';         // add | move | decor | delete
+let decorSide = 'left';
+let selectedDecorId = 1;
+let draggingIdx = -1;
+let hoverSegIdx = -1;
+
+// segDecor[i] = {left:id, right:id} — assigné par point de contrôle i
+// (le décor "colle" au point i et s'applique au segment échantillonné le
+// plus proche de ce point lors de l'export)
+let pointDecor = [];
+
+// vue (pan/zoom)
+let view = { x: 0, y: 0, scale: 0.5 };
+let panning = false, panStart = null;
+
+function worldToScreen(p) {
+  return {
+    x: (p.x - view.x) * view.scale + cv.width / 2,
+    y: (p.y - view.y) * view.scale + cv.height / 2
+  };
+}
+function screenToWorld(p) {
+  return {
+    x: (p.x - cv.width / 2) / view.scale + view.x,
+    y: (p.y - cv.height / 2) / view.scale + view.y
+  };
+}
+
+// --- Rééchantillonnage du polygone fermé en segments de longueur fixe ---
+function resample(pts, segLen) {
+  if (pts.length < 3) return { segs: [], totalLen: 0 };
+  const loop = pts.concat([pts[0]]);
+  // longueur cumulée de chaque bout de polyligne
+  let cum = [0];
+  for (let i = 1; i < loop.length; i++) {
+    const dx = loop[i].x - loop[i-1].x, dy = loop[i].y - loop[i-1].y;
+    cum.push(cum[i-1] + Math.hypot(dx, dy));
+  }
+  const totalLen = cum[cum.length - 1];
+  const n = Math.max(1, Math.round(totalLen / segLen));
+  const actualStep = totalLen / n;
+
+  function pointAt(dist) {
+    dist = ((dist % totalLen) + totalLen) % totalLen;
+    let i = 1;
+    while (i < cum.length && cum[i] < dist) i++;
+    const segStart = cum[i-1], segEnd = cum[i];
+    const t = segEnd > segStart ? (dist - segStart) / (segEnd - segStart) : 0;
+    return {
+      x: loop[i-1].x + (loop[i].x - loop[i-1].x) * t,
+      y: loop[i-1].y + (loop[i].y - loop[i-1].y) * t,
+      srcIdx: i - 1
+    };
+  }
+
+  const samples = [];
+  for (let i = 0; i <= n; i++) samples.push(pointAt(i * actualStep));
+
+  const segs = [];
+  for (let i = 0; i < n; i++) {
+    const a = samples[i], b = samples[i+1];
+    segs.push({
+      x0: a.x, y0: a.y, x1: b.x, y1: b.y,
+      dx: b.x - a.x, dy: b.y - a.y,
+      length: actualStep,
+      srcIdx: a.srcIdx,
+      decorLeft: 0, decorRight: 0
+    });
+  }
+  return { segs, totalLen };
+}
+
+function headingDeltas(segs) {
+  // angle de virage réel (rad) entre le segment i-1 et i, pour dériver
+  // une valeur "curve" suggérée pour le rendu pseudo-3D.
+  const n = segs.length;
+  const heads = segs.map(s => Math.atan2(s.dy, s.dx));
+  const deltas = [];
+  for (let i = 0; i < n; i++) {
+    const prev = heads[(i - 1 + n) % n];
+    let d = heads[i] - prev;
+    while (d > Math.PI) d -= 2*Math.PI;
+    while (d < -Math.PI) d += 2*Math.PI;
+    deltas.push(d);
+  }
+  return deltas;
+}
+
+function currentSample() {
+  const segLen = parseFloat(document.getElementById('segLen').value) || 80;
+  return resample(points, segLen);
+}
+
+// applique les décors peints par point de contrôle aux segments échantillonnés
+function applyDecor(segs) {
+  if (!points.length) return;
+  for (const seg of segs) {
+    const pd = pointDecor[seg.srcIdx] || {};
+    seg.decorLeft = pd.left || 0;
+    seg.decorRight = pd.right || 0;
+  }
+}
+
+// --- Dessin ---
+function draw() {
+  ctx.clearRect(0, 0, cv.width, cv.height);
+
+  const { segs, totalLen } = currentSample();
+  applyDecor(segs);
+
+  // tracé échantillonné (le vrai circuit tel qu'il sera exporté)
+  if (segs.length) {
+    ctx.strokeStyle = '#4fd1c5';
+    ctx.lineWidth = 10;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    for (const s of segs) {
+      const p0 = worldToScreen({x:s.x0,y:s.y0});
+      const p1 = worldToScreen({x:s.x1,y:s.y1});
+      ctx.moveTo(p0.x, p0.y);
+      ctx.lineTo(p1.x, p1.y);
+    }
+    ctx.stroke();
+
+    // liseré central
+    ctx.strokeStyle = '#0e1116';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (const s of segs) {
+      const p0 = worldToScreen({x:s.x0,y:s.y0});
+      const p1 = worldToScreen({x:s.x1,y:s.y1});
+      ctx.moveTo(p0.x, p0.y);
+      ctx.lineTo(p1.x, p1.y);
+    }
+    ctx.stroke();
+
+    // marqueurs décor
+    segs.forEach((s, i) => {
+      const mid = worldToScreen({x:(s.x0+s.x1)/2, y:(s.y0+s.y1)/2});
+      const ang = Math.atan2(s.dy, s.dx);
+      const nx = -Math.sin(ang), ny = Math.cos(ang);
+      if (s.decorLeft) {
+        const lp = worldToScreen({x:(s.x0+s.x1)/2 + nx*22, y:(s.y0+s.y1)/2 + ny*22});
+        drawDecorDot(lp, s.decorLeft);
+      }
+      if (s.decorRight) {
+        const rp = worldToScreen({x:(s.x0+s.x1)/2 - nx*22, y:(s.y0+s.y1)/2 - ny*22});
+        drawDecorDot(rp, s.decorRight);
+      }
+      if (i === hoverSegIdx) {
+        ctx.beginPath();
+        ctx.arc(mid.x, mid.y, 6, 0, 7);
+        ctx.fillStyle = '#f6ad55';
+        ctx.fill();
+      }
+    });
+  }
+
+  // polyligne brute (points de contrôle) en pointillés fins par dessus
+  if (points.length) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4,4]);
+    ctx.beginPath();
+    const loopPts = closed ? points.concat([points[0]]) : points;
+    loopPts.forEach((p, i) => {
+      const sp = worldToScreen(p);
+      if (i === 0) ctx.moveTo(sp.x, sp.y); else ctx.lineTo(sp.x, sp.y);
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // points de contrôle
+  points.forEach((p, i) => {
+    const sp = worldToScreen(p);
+    ctx.beginPath();
+    ctx.arc(sp.x, sp.y, i === 0 ? 7 : 5, 0, 7);
+    ctx.fillStyle = i === 0 ? '#f6ad55' : '#e6e9ef';
+    ctx.fill();
+    ctx.strokeStyle = '#14181f';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  });
+
+  updateStats(segs, totalLen);
+}
+
+function drawDecorDot(p, id) {
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, 5, 0, 7);
+  ctx.fillStyle = id === 12 || id === 13 ? '#e05263' : '#7fd85a';
+  ctx.fill();
+}
+
+function updateStats(segs, totalLen) {
+  document.getElementById('statPoints').textContent = points.length;
+  document.getElementById('statSegs').textContent = segs.length;
+  document.getElementById('statLen').textContent = Math.round(totalLen);
+  document.getElementById('statClosed').textContent = points.length >= 3 ? 'oui (auto)' : 'non (3 pts min)';
+}
+
+// --- Interaction souris ---
+function nearestPointIdx(worldPos, maxDist) {
+  let best = -1, bestD = maxDist;
+  points.forEach((p, i) => {
+    const d = Math.hypot(p.x - worldPos.x, p.y - worldPos.y);
+    if (d < bestD) { bestD = d; best = i; }
+  });
+  return best;
+}
+
+cv.addEventListener('mousedown', (e) => {
+  const rect = cv.getBoundingClientRect();
+  const sp = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  const wp = screenToWorld(sp);
+
+  if (e.button === 1 || e.button === 2 || mode === 'pan') {
+    panning = true; panStart = { sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y };
+    return;
+  }
+
+  const hitR = 14 / view.scale;
+  const idx = nearestPointIdx(wp, hitR);
+
+  if (mode === 'add') {
+    if (idx === -1) { points.push(wp); pointDecor.push({}); }
+    draw();
+  } else if (mode === 'move') {
+    if (idx !== -1) draggingIdx = idx;
+  } else if (mode === 'delete') {
+    if (idx !== -1) { points.splice(idx,1); pointDecor.splice(idx,1); }
+    draw();
+  } else if (mode === 'decor') {
+    // trouve le segment échantillonné le plus proche du clic
+    const { segs } = currentSample();
+    let best = -1, bestD = Infinity;
+    segs.forEach((s, i) => {
+      const mx = (s.x0+s.x1)/2, my=(s.y0+s.y1)/2;
+      const d = Math.hypot(mx-wp.x, my-wp.y);
+      if (d < bestD) { bestD = d; best = i; }
+    });
+    if (best !== -1) {
+      const srcIdx = segs[best].srcIdx;
+      if (!pointDecor[srcIdx]) pointDecor[srcIdx] = {};
+      pointDecor[srcIdx][decorSide] = selectedDecorId;
+    }
+    draw();
+  }
+});
+
+window.addEventListener('mousemove', (e) => {
+  const rect = cv.getBoundingClientRect();
+  const sp = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+
+  if (panning) {
+    view.x = panStart.vx - (e.clientX - panStart.sx) / view.scale;
+    view.y = panStart.vy - (e.clientY - panStart.sy) / view.scale;
+    draw();
+    return;
+  }
+  if (draggingIdx !== -1) {
+    points[draggingIdx] = screenToWorld(sp);
+    draw();
+    return;
+  }
+
+  const wp = screenToWorld(sp);
+  const { segs } = currentSample();
+  let best = -1, bestD = 20 / view.scale;
+  segs.forEach((s, i) => {
+    const mx = (s.x0+s.x1)/2, my=(s.y0+s.y1)/2;
+    const d = Math.hypot(mx-wp.x, my-wp.y);
+    if (d < bestD) { bestD = d; best = i; }
+  });
+  if (best !== hoverSegIdx) {
+    hoverSegIdx = best;
+    const info = document.getElementById('segInfo');
+    if (best !== -1) {
+      const deltas = headingDeltas(segs);
+      const K = parseFloat(document.getElementById('curveK').value) || 0.045;
+      const curve = deltas[best] / (segs[best].length * K);
+      info.innerHTML = `Segment <b>#${best}</b> — longueur <b>${segs[best].length.toFixed(1)}</b> · virage réel <b>${(deltas[best]*180/Math.PI).toFixed(1)}°</b> · curve suggéré <b>${curve.toFixed(2)}</b> · décor G:<b>${DECOR_NAMES[segs[best].decorLeft]||'-'}</b> D:<b>${DECOR_NAMES[segs[best].decorRight]||'-'}</b>`;
+    } else {
+      info.textContent = 'Survole un point du tracé échantillonné pour voir ses infos (longueur / courbure / décor).';
+    }
+    draw();
+  }
+});
+
+window.addEventListener('mouseup', () => { panning = false; draggingIdx = -1; });
+cv.addEventListener('contextmenu', (e) => e.preventDefault());
+
+cv.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const rect = cv.getBoundingClientRect();
+  const sp = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  const before = screenToWorld(sp);
+  view.scale *= (e.deltaY < 0) ? 1.1 : 0.9;
+  view.scale = Math.max(0.05, Math.min(4, view.scale));
+  const after = screenToWorld(sp);
+  view.x += (before.x - after.x);
+  view.y += (before.y - after.y);
+  draw();
+}, { passive: false });
+
+// pan avec bouton du milieu géré au-dessus ; pan fond avec clic gauche
+// seulement si mode 'move' hors point -> on ajoute un mode dédié simple :
+wrap.addEventListener('mousedown', (e) => {
+  if (e.button === 0 && mode === 'move') {
+    const rect = cv.getBoundingClientRect();
+    const wp = screenToWorld({ x: e.clientX-rect.left, y: e.clientY-rect.top });
+    const idx = nearestPointIdx(wp, 14/view.scale);
+    if (idx === -1) { panning = true; panStart = { sx:e.clientX, sy:e.clientY, vx:view.x, vy:view.y }; }
+  }
+});
+
+// --- Barre latérale : modes ---
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll('.modeBtn').forEach(b => b.classList.remove('active'));
+  document.getElementById({
+    add:'modeAdd', move:'modeMove', decor:'modeDecor', delete:'modeDelete'
+  }[m]).classList.add('active');
+}
+document.getElementById('modeAdd').onclick = () => setMode('add');
+document.getElementById('modeMove').onclick = () => setMode('move');
+document.getElementById('modeDecor').onclick = () => setMode('decor');
+document.getElementById('modeDelete').onclick = () => setMode('delete');
+
+document.getElementById('sideLeft').onclick = (e) => {
+  decorSide = 'left';
+  document.getElementById('sideLeft').classList.add('active');
+  document.getElementById('sideRight').classList.remove('active');
+};
+document.getElementById('sideRight').onclick = (e) => {
+  decorSide = 'right';
+  document.getElementById('sideRight').classList.add('active');
+  document.getElementById('sideLeft').classList.remove('active');
+};
+
+// palette décor
+const palette = document.getElementById('decorPalette');
+Object.entries(DECOR_NAMES).forEach(([id, name]) => {
+  const b = document.createElement('button');
+  b.textContent = name;
+  b.dataset.id = id;
+  if (parseInt(id) === selectedDecorId) b.classList.add('active');
+  b.onclick = () => {
+    selectedDecorId = parseInt(id);
+    palette.querySelectorAll('button').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+  };
+  palette.appendChild(b);
+});
+
+document.getElementById('btnClear').onclick = () => {
+  if (confirm('Effacer tout le tracé ?')) {
+    points = []; pointDecor = []; draw();
+  }
+};
+document.getElementById('btnUndo').onclick = () => {
+  points.pop(); pointDecor.pop(); draw();
+};
+document.getElementById('segLen').onchange = draw;
+document.getElementById('curveK').onchange = draw;
+
+// --- Export C++ ---
+document.getElementById('btnExport').onclick = () => {
+  const { segs, totalLen } = currentSample();
+  applyDecor(segs);
+  const deltas = headingDeltas(segs);
+  const K = parseFloat(document.getElementById('curveK').value) || 0.045;
+  const theme = document.getElementById('themeSelect').value;
+
+  if (segs.length < 4) {
+    alert("Dessine au moins un petit circuit (3-4 points) avant d'exporter.");
+    return;
+  }
+
+  let lines = [];
+  lines.push(`// =============================================================`);
+  lines.push(`// Circuit généré par l'éditeur AKArt (track_editor.html)`);
+  lines.push(`// ${segs.length} segments, longueur totale ${totalLen.toFixed(0)}`);
+  lines.push(`// shape_dx/shape_dy = déplacement RÉEL (pour minimap fidèle) ;`);
+  lines.push(`// curve = valeur suggérée pour le rendu pseudo-3D (à ajuster au feeling).`);
+  lines.push(`// =============================================================`);
+  lines.push(`#pragma once`);
+  lines.push(`#include "kart_types.h"`);
+  lines.push(`#include "track_example.h"  // pour place_turn_signs()`);
+  lines.push(``);
+  lines.push(`namespace kart {`);
+  lines.push(``);
+  lines.push(`inline Track make_editor_track(SkyTheme theme = SkyTheme::${theme}) {`);
+  lines.push(`    Track t;`);
+  lines.push(`    t.sky_theme = theme;`);
+  lines.push(`    t.has_shape = true;`);
+  lines.push(``);
+  lines.push(`    struct RawSeg { float length, curve, dx, dy; uint8_t dl, dr; };`);
+  lines.push(`    static const RawSeg raw[] = {`);
+  segs.forEach((s, i) => {
+    const curve = (deltas[i] / (s.length * K));
+    lines.push(`        { ${s.length.toFixed(2)}f, ${curve.toFixed(4)}f, ${s.dx.toFixed(2)}f, ${s.dy.toFixed(2)}f, ${s.decorLeft}, ${s.decorRight} },`);
+  });
+  lines.push(`    };`);
+  lines.push(``);
+  lines.push(`    float z = 0.0f;`);
+  lines.push(`    for (auto& r : raw) {`);
+  lines.push(`        Segment seg{};`);
+  lines.push(`        seg.length     = r.length;`);
+  lines.push(`        seg.curve      = r.curve;`);
+  lines.push(`        seg.shape_dx   = r.dx;`);
+  lines.push(`        seg.shape_dy   = r.dy;`);
+  lines.push(`        seg.decor_left = r.dl;`);
+  lines.push(`        seg.decor_right= r.dr;`);
+  lines.push(`        seg.start_z    = z;`);
+  lines.push(`        z += r.length;`);
+  lines.push(`        t.segs.push_back(seg);`);
+  lines.push(`    }`);
+  lines.push(`    t.total_length = z;`);
+  lines.push(``);
+  lines.push(`    place_turn_signs(t);`);
+  lines.push(`    return t;`);
+  lines.push(`}`);
+  lines.push(``);
+  lines.push(`} // namespace kart`);
+
+  const box = document.getElementById('exportBox');
+  box.style.display = 'block';
+  box.value = lines.join('\n');
+  box.scrollIntoView({ behavior: 'smooth' });
+  box.select();
+};
+
+resizeCanvas();
+</script>
+</body>
+</html>

@@ -16,6 +16,9 @@
 #include "gb_graphics.h"
 #include "gb_common.h"
 #include <algorithm>
+#include <cstdio>
+#include <cstring>
+#include <sys/stat.h>
 
 extern char font8x8_basic[128][8];
 
@@ -56,6 +59,7 @@ static uint16_t color_to_rgb565(Color c) {
         case Color::Yellow:    return rgb(255, 220, 0);
         case Color::Red:       return rgb(220, 30, 30);
         case Color::Green:     return rgb(40, 180, 70);
+        case Color::DarkGreen: return rgb(20, 120, 45);
         case Color::DarkGray:  return rgb(60, 60, 65);
         case Color::Gray:      return rgb(130, 130, 135);
         case Color::SkyBlue:   return rgb(110, 180, 230);
@@ -63,6 +67,7 @@ static uint16_t color_to_rgb565(Color c) {
         case Color::Orange:    return rgb(230, 130, 30);
         case Color::Brown:     return rgb(110, 70, 40);
         case Color::LightGray: return rgb(190, 190, 195);
+        case Color::Cyan:      return rgb(0, 220, 230);
     }
     return rgb(255, 0, 255);
 }
@@ -213,14 +218,102 @@ void graphics_draw_bitmap565(int x, int y, int w, int h, const uint16_t* data,
 
     int px = x + s_tx;
     int py = y + s_ty;
+
+    // Écrêtage réel aux limites visibles de l'écran. safe_coord() protège
+    // uniquement contre le débordement int16_t (crash "Loop scanline 0
+    // timeout"), mais une coordonnée hors-écran (ex: x=350 avec un écran de
+    // 320px) reste "sûre" pour safe_coord tout en étant transmise telle
+    // quelle à g_gfx.drawPixel — si ce dernier ne fait pas lui-même de test
+    // de limites strict, l'écriture peut retomber sur une autre ligne du
+    // framebuffer (adresse = y*largeur+x non bornée), ce qui se manifeste
+    // par un morceau de sprite qui "réapparaît" de l'autre côté de l'écran
+    // pile quand il sort par la droite ou le bas. On ne laisse donc plus
+    // rien sortir de [0, largeur) x [0, hauteur) avant l'appel bas niveau.
+    const int screen_w = graphics_width();
+    const int screen_h = graphics_height();
+
     for (int row = 0; row < h; ++row) {
+        int py_row = py + row;
+        if (py_row < 0 || py_row >= screen_h) continue;
         const uint16_t* line = data + row * w;
         for (int col = 0; col < w; ++col) {
+            int px_col = px + col;
+            if (px_col < 0 || px_col >= screen_w) continue;
             uint16_t v = line[col];
             if (use_transparency && v == transparent_key) continue;
-            g_gfx.drawPixel(safe_coord(px + col), safe_coord(py + row), v);
+            g_gfx.drawPixel(safe_coord(px_col), safe_coord(py_row), v);
         }
     }
+}
+
+void graphics_draw_bitmap565_scaled(int x, int y, int dst_w, int dst_h,
+                                     const uint16_t* data, int src_w, int src_h,
+                                     bool use_transparency, uint16_t transparent_key) {
+    if (dst_w <= 0 || dst_h <= 0) return;
+    if (x < -kSafeCoordLimit || x > kSafeCoordLimit ||
+        y < -kSafeCoordLimit || y > kSafeCoordLimit) return;
+
+    // Garde-fou : une taille de destination démesurée pourrait, via
+    // safe_coord, finir par dessiner un nombre de pixels absurde (boucle
+    // très longue). On la borne large mais raisonnablement.
+    if (dst_w > 2000) dst_w = 2000;
+    if (dst_h > 2000) dst_h = 2000;
+
+    int px = x + s_tx;
+    int py = y + s_ty;
+
+    // Même correctif que graphics_draw_bitmap565 ci-dessus : écrêtage réel
+    // aux limites d'écran, pas seulement anti-crash. C'est cette fonction
+    // qui dessine les décors (arbres, panneaux...) via draw_decor_side —
+    // c'est donc ELLE qui était responsable du morceau de sprite qui
+    // réapparaissait de l'autre côté de l'écran en sortie de champ.
+    const int screen_w = graphics_width();
+    const int screen_h = graphics_height();
+
+    // PERF : (col*src_w)/dst_w calculait une division PAR PIXEL (jusqu'à
+    // des dizaines de milliers par frame rien que pour le décor : chaque
+    // arbre/panneau/portique visible, chaque frame). Remplacé par un pas en
+    // virgule fixe (16.16) précalculé une seule fois par appel : la
+    // division par pixel devient une simple addition + décalage. Même
+    // principe pour l'axe vertical (une division au lieu de dst_h).
+    const int32_t step_x_fp = (int32_t)(((int64_t)src_w << 16) / dst_w);
+    const int32_t step_y_fp = (int32_t)(((int64_t)src_h << 16) / dst_h);
+
+    int32_t src_row_fp = 0;
+    for (int row = 0; row < dst_h; ++row) {
+        int py_row = py + row;
+        if (py_row >= 0 && py_row < screen_h) {
+            int src_row = src_row_fp >> 16;
+            if (src_row >= src_h) src_row = src_h - 1;
+            const uint16_t* line = data + src_row * src_w;
+
+            int32_t src_col_fp = 0;
+            for (int col = 0; col < dst_w; ++col) {
+                int px_col = px + col;
+                if (px_col >= 0 && px_col < screen_w) {
+                    int src_col = src_col_fp >> 16;
+                    if (src_col >= src_w) src_col = src_w - 1;
+
+                    uint16_t v = line[src_col];
+                    if (!use_transparency || v != transparent_key) {
+                        g_gfx.drawPixel(safe_coord(px_col), safe_coord(py_row), v);
+                    }
+                }
+                src_col_fp += step_x_fp;
+            }
+        }
+        src_row_fp += step_y_fp;
+    }
+}
+
+void graphics_draw_pixel_raw(int x, int y, uint16_t color) {
+    g_gfx.drawPixel((int16_t)x, (int16_t)y, color);
+}
+
+void graphics_hline_raw(int x, int y, int w, uint16_t color) {
+    if (w <= 0) return;
+    g_gfx.setColor(color);
+    g_gfx.fillRect((int16_t)x, (int16_t)y, (int16_t)w, 2);
 }
 
 void graphics_draw_sprite(SpriteId id, int x, int y) {
@@ -233,5 +326,91 @@ void graphics_draw_sprite_rotated(SpriteId id, int x, int y, float angle_deg) {
 
 int graphics_width()  { return SCREEN_WIDTH; }
 int graphics_height() { return SCREEN_HEIGHT; }
+
+// -----------------------------------------------------------------------------
+// graphics_save_screenshot_bmp()
+// -----------------------------------------------------------------------------
+// Lit le framebuffer déjà dessiné via lcd_getpixel() (pixel hardware au format
+// BGR565 : rouge sur les 5 bits bas, vert sur les 6 bits du milieu, bleu sur
+// les 5 bits hauts — cf. lcd_color_rgb() dans gb_ll_lcd), et écrit un BMP 24
+// bits classique (BGR, lignes bas→haut, alignement 4 octets par ligne — le
+// format BMP standard, lisible tel quel par n'importe quel visualiseur).
+//
+// Le nom de fichier est court (8.3 : SHOTxxxx.BMP) car la carte SD de la AKA
+// s'est déjà révélée exigeante sur ce point (cf. pAKAman / SCORES.DAT).
+bool graphics_save_screenshot_bmp(char* out_path, int out_path_size) {
+    static const char* kDir = "/sdcard/AKART";
+
+    // Le dossier peut déjà exister (mkdir échoue alors silencieusement, ce
+    // qui est very bien : on ignore son retour).
+    mkdir(kDir, 0777);
+
+    // Cherche le premier nom SHOTxxxx.BMP non utilisé.
+    char path[64];
+    int shot_num = -1;
+    for (int i = 0; i < 10000; ++i) {
+        snprintf(path, sizeof(path), "%s/SHOT%04d.BMP", kDir, i);
+        FILE* test = fopen(path, "rb");
+        if (!test) { shot_num = i; break; }
+        fclose(test);
+    }
+    if (shot_num < 0) return false; // 10000 captures déjà présentes...
+
+    FILE* f = fopen(path, "wb");
+    if (!f) return false;
+
+    const int W = SCREEN_WIDTH;
+    const int H = SCREEN_HEIGHT;
+    const int row_bytes = W * 3;
+    const int row_padding = (4 - (row_bytes % 4)) % 4;
+    const int row_stride = row_bytes + row_padding;
+    const uint32_t data_size = (uint32_t)row_stride * H;
+    const uint32_t file_size = 14 + 40 + data_size;
+
+    uint8_t header[54] = {0};
+    // BITMAPFILEHEADER (14 octets)
+    header[0] = 'B'; header[1] = 'M';
+    header[2]  = (uint8_t)(file_size);
+    header[3]  = (uint8_t)(file_size >> 8);
+    header[4]  = (uint8_t)(file_size >> 16);
+    header[5]  = (uint8_t)(file_size >> 24);
+    header[10] = 54; // offset des données pixel
+
+    // BITMAPINFOHEADER (40 octets)
+    header[14] = 40;
+    header[18] = (uint8_t)(W);       header[19] = (uint8_t)(W >> 8);
+    header[22] = (uint8_t)(H);       header[23] = (uint8_t)(H >> 8);
+    header[26] = 1;                  // planes
+    header[28] = 24;                 // bits par pixel
+    header[34] = (uint8_t)(data_size);
+    header[35] = (uint8_t)(data_size >> 8);
+    header[36] = (uint8_t)(data_size >> 16);
+    header[37] = (uint8_t)(data_size >> 24);
+
+    fwrite(header, 1, 54, f);
+
+    uint8_t row[SCREEN_WIDTH * 3 + 3] = {0}; // + marge pour le padding
+    for (int y = H - 1; y >= 0; --y) {       // BMP stocke les lignes bas→haut
+        for (int x = 0; x < W; ++x) {
+            gb_pixel v = lcd_getpixel((uint16_t)x, (uint16_t)y);
+            uint8_t r5 = v & 0x1F;
+            uint8_t g6 = (v >> 5) & 0x3F;
+            uint8_t b5 = (v >> 11) & 0x1F;
+            row[x * 3 + 0] = (uint8_t)((b5 * 255) / 31); // BMP = B,G,R
+            row[x * 3 + 1] = (uint8_t)((g6 * 255) / 63);
+            row[x * 3 + 2] = (uint8_t)((r5 * 255) / 31);
+        }
+        for (int p = 0; p < row_padding; ++p) row[row_bytes + p] = 0;
+        fwrite(row, 1, row_stride, f);
+    }
+
+    fclose(f);
+
+    if (out_path && out_path_size > 0) {
+        strncpy(out_path, path, out_path_size - 1);
+        out_path[out_path_size - 1] = '\0';
+    }
+    return true;
+}
 
 } // namespace core

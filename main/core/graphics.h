@@ -15,6 +15,7 @@ enum class Color {
     Yellow,
     Red,
     Green,
+    DarkGreen,   // ← ajouté : 2e teinte d'herbe (au lieu de réutiliser DarkGray, qui donnait un gris pur, pas une nuance de vert)
     DarkGray,
     Gray,
     SkyBlue,
@@ -22,6 +23,7 @@ enum class Color {
     Orange,
     Brown,
     LightGray,
+    Cyan,
 };
 
 void graphics_init();
@@ -61,8 +63,35 @@ void graphics_draw_bitmap565(int x, int y, int w, int h, const uint16_t* data,
                               bool use_transparency = true,
                               uint16_t transparent_key = TRANSPARENT_KEY);
 
+// Variante avec mise à l'échelle (nearest-neighbor, suffisant en pixel-art).
+// (x,y) = coin haut-gauche de la zone DE DESTINATION (déjà à l'échelle).
+// dst_w/dst_h = taille voulue à l'écran ; src_w/src_h = taille réelle des
+// données sources (data). Utilisée pour les karts adverses, dont la taille
+// à l'écran varie avec la distance (perspective).
+void graphics_draw_bitmap565_scaled(int x, int y, int dst_w, int dst_h,
+                                     const uint16_t* data, int src_w, int src_h,
+                                     bool use_transparency = true,
+                                     uint16_t transparent_key = TRANSPARENT_KEY);
+
+// Dessin direct d'un pixel RGB565 hardware (sans safe_coord ni translation) —
+// utilisé uniquement pour le rendu du fond défilant (draw_sky) dont les
+// coordonnées sont toujours dans les limites de l'écran.
+void graphics_draw_pixel_raw(int x, int y, uint16_t color);
+
+// Dessin d'une bande horizontale RGB565 hardware (sans translation ni écrêtage).
+// Utilisé par le rendu du fond défilant (draw_sky) — plus rapide que fillRect
+// car évite la conversion de couleur (données déjà en format hardware).
+void graphics_hline_raw(int x, int y, int w, uint16_t color);
+
 int graphics_width();
 int graphics_height();
+
+// Capture l'écran courant (ce qui a déjà été dessiné dans le framebuffer, AVANT
+// graphics_present()) et l'enregistre en BMP 24 bits sur la carte SD, dans
+// /sdcard/AKART/, sous un nom court 8.3 (SHOTxxxx.BMP) auto-incrémenté.
+// Retourne true si l'écriture a réussi ; out_path (si non nul) reçoit le
+// chemin complet du fichier écrit (utile pour l'affichage d'un message).
+bool graphics_save_screenshot_bmp(char* out_path = nullptr, int out_path_size = 0);
 
 // Accès interne utilisé par sprites.cpp pour dessiner avec les coordonnées
 // déjà décalées par la pile de translation.
